@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+requests
+yt-dlp
+groq
+python-dotenv
+python-multipart
+gTTS
+deep-translator
+edge-tts
