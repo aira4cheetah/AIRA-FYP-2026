@@ -30,3 +30,14 @@ app.include_router(progress.router)
 @app.get("/health")
 def health():
     return {"ok": True, "service": config.API_TITLE}
+
+
+import subprocess
+
+@app.get("/ffmpeg-check")
+def ffmpeg_check():
+    try:
+        result = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True)
+        return {"output": result.stdout[:200]}
+    except Exception as e:
+        return {"error": str(e)}
