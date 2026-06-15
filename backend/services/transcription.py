@@ -23,17 +23,6 @@ logger = logging.getLogger(__name__)
 # 16kHz mono 48kbps mp3: small uploads, plenty for speech recognition.
 _AUDIO_ARGS = ["-vn", "-ac", "1", "-ar", "16000", "-codec:a", "libmp3lame", "-b:a", "48k", "-compression_level", "9"]
 
-ydl_opts = {
-    'format': 'bestaudio/best',
-    # ... leave all your original settings exactly as they are ...
-}
-
-# Add these two lines directly below your dictionary:
-if os.path.exists("cookies.txt"):
-    ydl_opts['cookiefile'] = "cookies.txt"
-
-
-
 def _run_ffmpeg(command: List[str], timeout: int, failure_detail: str) -> None:
     try:
         proc = subprocess.run(
