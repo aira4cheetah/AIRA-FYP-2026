@@ -14,6 +14,16 @@ logger = logging.getLogger(__name__)
 
 MAX_CAPTION_LANGS = 6
 
+ydl_opts = {
+    'format': 'bestaudio/best',
+    # ... leave all your original settings exactly as they are ...
+}
+
+# Add these two lines directly below your dictionary:
+if os.path.exists("cookies.txt"):
+    ydl_opts['cookiefile'] = "cookies.txt"
+
+
 
 def extract_video_id(url: str) -> Optional[str]:
     m = re.search(r"(?:v=|youtu\.be/|embed/|shorts/|live/)([a-zA-Z0-9_-]{11})", url)
