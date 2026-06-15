@@ -8,4 +8,3 @@ python-multipart
 gTTS
 deep-translator
 edge-tts
-youtube-transcript-api
