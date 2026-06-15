@@ -261,8 +261,11 @@ def transcribe_youtube_with_groq(
     info: Optional[dict] = None,
     job_id: str = "",
 ) -> List[dict]:
+    browser_cookie = (os.getenv("YTDLP_COOKIES_FROM_BROWSER") or "").strip().lower()
+    proxy = (os.getenv("YTDLP_PROXY") or "").strip()
     client = transcription_client()
-    progress.set_stage(job_id, "download", "Downloading stable audio channel")
+
+    progress.set_stage(job_id, "download", "Downloading audio stream")
 
     def _dl_hook(status: dict) -> None:
         if status.get("status") != "downloading":
@@ -274,46 +277,68 @@ def transcribe_youtube_with_groq(
             progress.set_percent(job_id, done * 100.0 / total, f"Downloading audio ({mb:.0f} MB)")
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        # Use an unblocked, dedicated proxy framework specifically for yt-dlp execution routes
-        opts = {
-            "format": "bestaudio[abr<=80]/bestaudio/best",
-            "outtmpl": os.path.join(temp_dir, "audio.%(ext)s"),
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": True,
-            "retries": 6,
-            "socket_timeout": 25,
-            # Public unblocked routing nodes perfectly suited for streaming content bypasses
-            "proxy": "http://unblock.io.proxy.public:8080" if not os.getenv("YTDLP_PROXY") else os.getenv("YTDLP_PROXY"),
-        }
-        if job_id:
-            opts["progress_hooks"] = [_dl_hook]
+        def _build_opts(use_cookie: bool) -> dict:
+            # Smallest useful audio stream, no re-encode (ffmpeg reads the
+            # native container directly), parallel fragment download.
+            opts = {
+                "format": "bestaudio[abr<=80]/bestaudio/best",
+                "outtmpl": os.path.join(temp_dir, "audio.%(ext)s"),
+                "noplaylist": True,
+                "quiet": True,
+                "no_warnings": True,
+                "retries": 5,
+                "fragment_retries": 5,
+                "socket_timeout": 30,
+                "concurrent_fragment_downloads": 8,
+            }
+            if job_id:
+                opts["progress_hooks"] = [_dl_hook]
+            if use_cookie and browser_cookie:
+                opts["cookiesfrombrowser"] = (browser_cookie,)
+            if proxy:
+                opts["proxy"] = proxy
+            return opts
 
-        try:
-            with YoutubeDL(opts) as ydl:
-                ydl.download([url])
-        except Exception as first_err:
-            logger.warning(f"Primary tunnel bypass dropped, trying explicit web extraction engine: {first_err}")
-            # Absolute Bulletproof Fallback: Route stream conversion via public open infrastructure micro-engines
+        t_dl = time.time()
+        # Reuse the metadata already fetched by analyze_youtube so yt-dlp does not
+        # extract the same video info a second time. Fall back to a full download
+        # if reuse fails for any reason.
+        downloaded = False
+        if info is not None:
             try:
-                opts["proxy"] = "http://45.55.44.11:3128" # Reliable fallback open proxy asset gateway
-                with YoutubeDL(opts) as ydl:
-                    ydl.download([url])
-            except Exception as total_failure:
-                raise HTTPException(
-                    status_code=502, 
-                    detail="YouTube processing infrastructure is busy. Please upload the media file directly as a stable alternative!"
-                ) from total_failure
+                with YoutubeDL(_build_opts(bool(browser_cookie))) as ydl:
+                    ydl.process_ie_result(copy.deepcopy(info), download=True)
+                downloaded = True
+            except Exception as exc:
+                logger.warning("Reusing analyzed metadata failed (%s); falling back to full download.", exc)
+
+        if not downloaded:
+            last_error = None
+            attempts = [True, False] if browser_cookie else [False]
+            for use_cookie in attempts:
+                try:
+                    with YoutubeDL(_build_opts(use_cookie)) as ydl:
+                        ydl.download([url])
+                    last_error = None
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    continue
+            if last_error is not None:
+                raise HTTPException(status_code=502, detail=f"YouTube audio download failed: {last_error}") from last_error
+        logger.info(
+            "[timing] yt-dlp audio download%s: %.2fs",
+            " (reused metadata)" if downloaded else " (re-extracted)",
+            time.time() - t_dl,
+        )
 
         audio_path = _find_downloaded_audio(temp_dir)
         if not audio_path:
-            raise HTTPException(status_code=500, detail="Audio file reconstruction error.")
+            raise HTTPException(status_code=500, detail="Audio extraction failed.")
 
         t_tx = time.time()
-        # Feeds directly back into your fully operational chunking/processing ecosystem!
         segments = _transcribe_local_audio(audio_path, temp_dir, job_id=job_id)
         logger.info("[timing] groq whisper transcription (ffmpeg+API): %.2fs", time.time() - t_tx)
-        
         translated, _engine = translate_segments(client, segments, target_language, job_id=job_id)
         return translated
 
