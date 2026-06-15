@@ -6,6 +6,22 @@ from fastapi.middleware.cors import CORSMiddleware
 import config
 from routes import analysis, file_upload, progress, settings, translate, tts, youtube
 
+import os
+import base64
+
+# Automatically reconstruct the cookies file on the server at startup
+encoded_cookies = os.getenv("YTDL_COOKIES_BASE64")
+if encoded_cookies:
+    try:
+        decoded_bytes = base64.b64decode(encoded_cookies)
+        with open("cookies.txt", "wb") as f:
+            f.write(decoded_bytes)
+        # Tell yt-dlp exactly where to find the generated file automatically
+        os.environ["YT_DLP_COOKIES_FILE"] = "cookies.txt"
+    except Exception as e:
+        print(f"Cookie decoding failed: {e}")
+
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
 
 app = FastAPI(title=config.API_TITLE)
